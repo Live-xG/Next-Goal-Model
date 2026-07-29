@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#070B14">
+<meta name="description" content="In-play xG model: next goal probability and expected goals from live match data.">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="xG Dash">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23070B14'/%3E%3Crect x='4' y='17' width='6' height='11' rx='1.5' fill='%233FA0E8'/%3E%3Crect x='13' y='11' width='6' height='17' rx='1.5' fill='%233FA0E8'/%3E%3Crect x='22' y='4' width='6' height='24' rx='1.5' fill='%232FD48A'/%3E%3C/svg%3E">
+<title>Trading Dashboard — in-play xG</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#070B14;
+  --card:#151D2E;
+  --sunk:#0E1524;
+  --input:#2E3A56;
+  --inputbr:#3B4869;
+  --blue:#3FA0E8;
+  --green:#2FD48A;
+  --red:#E5484D;
+  --amber:#F0A93B;
+  --text:#E8EDF5;
+  --label:#7C8AA1;
+  --faint:#5C687C;
+  --sans:"IBM Plex Sans",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;-webkit-font-smoothing:antialiased}
+.page{max-width:1420px;margin:0 auto;padding:22px 16px 56px}
+
+.top{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+h1{
+  display:flex;align-items:center;gap:9px;
+  font-size:15px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--blue);margin:0;
+}
+h1 svg{width:16px;height:16px;flex:none}
+.add{
+  display:flex;align-items:center;gap:6px;
+  background:var(--card);border:1px solid var(--inputbr);border-radius:7px;
+  color:var(--text);font-family:var(--sans);font-size:11px;font-weight:600;
+  letter-spacing:.08em;text-transform:uppercase;padding:8px 13px;cursor:pointer;
+}
+.add:hover:not(:disabled){border-color:var(--blue);color:var(--blue)}
+.add:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.add:disabled{opacity:.35;cursor:not-allowed}
+.add span{font-size:14px;line-height:1}
+
+.board{display:grid;grid-template-columns:repeat(auto-fill,minmax(318px,1fr));gap:16px;align-items:start}
+
+/* ---- card ---- */
+.card{background:var(--card);border:1px solid #232C40;border-radius:9px;padding:14px 14px 16px;position:relative}
+.chead{display:flex;align-items:center;gap:6px;margin-bottom:11px}
+.teams{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:6px;flex:1;min-width:0}
+.teams i{font-style:normal;font-size:8.5px;letter-spacing:.1em;color:var(--faint);text-transform:uppercase}
+.tname{
+  width:100%;background:transparent;border:none;border-bottom:1px solid transparent;
+  color:var(--text);font-family:var(--sans);font-size:11.5px;font-weight:600;
+  letter-spacing:.08em;text-transform:uppercase;text-align:center;padding:3px 2px;
+}
+.tname:hover{border-bottom-color:#2E3A52}
+.tname:focus{outline:none;border-bottom-color:var(--blue)}
+.rm{
+  flex:none;width:20px;height:20px;border-radius:5px;
+  background:transparent;border:1px solid #2A3348;color:var(--faint);
+  font-size:13px;line-height:1;cursor:pointer;padding:0;
+}
+.rm:hover{border-color:var(--red);color:var(--red)}
+.rm:focus-visible{outline:2px solid var(--red);outline-offset:2px}
+.rule{height:1px;background:linear-gradient(90deg,transparent,#2E3A52 15%,#2E3A52 85%,transparent);margin:0 0 13px}
+
+.lab{
+  font-size:8.5px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--label);display:flex;align-items:center;justify-content:center;gap:4px;margin-bottom:5px;
+}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:11px}
+.solo{margin-bottom:11px}
+input[type=number]{
+  width:100%;padding:9px 6px;text-align:center;
+  font-family:var(--sans);font-size:15px;font-weight:600;color:var(--text);
+  background:var(--input);border:1px solid var(--inputbr);border-radius:6px;
+  -moz-appearance:textfield;
+}
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+input[type=number]:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+
+/* iOS zooms the viewport when a focused input is under 16px — lift it on touch only */
+@media (pointer:coarse){
+  input[type=number]{font-size:16px}
+  .tname{font-size:16px;letter-spacing:.02em}
+  .page{padding-left:12px;padding-right:12px}
+}
+
+.redrow{display:flex;align-items:center;gap:5px;margin-top:5px}
+.redrow input{width:12px;height:12px;accent-color:var(--red);margin:0}
+.redrow label{font-size:8.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);cursor:pointer}
+.redrow input:checked + label{color:var(--red)}
+
+.intense{margin-top:14px}
+.intense .hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.intense .hd .lab{margin:0}
+.intense .hd b{font-size:12px;font-weight:600;color:var(--blue)}
+input[type=range]{width:100%;accent-color:var(--blue);margin:0}
+input[type=range]:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+
+/* ---- info tooltip ---- */
+.i{
+  position:relative;display:inline-flex;align-items:center;justify-content:center;
+  width:12px;height:12px;border-radius:50%;flex:none;
+  background:var(--blue);color:#06121E;
+  font-size:8.5px;font-weight:700;font-style:normal;letter-spacing:0;cursor:help;
+}
+.i::after{
+  content:attr(data-tip);position:absolute;bottom:calc(100% + 7px);left:50%;
+  transform:translateX(-50%);width:196px;z-index:30;
+  background:#020610;border:1px solid var(--inputbr);border-radius:6px;
+  padding:8px 9px;color:var(--text);font-size:10.5px;font-weight:400;
+  letter-spacing:.01em;line-height:1.42;text-transform:none;text-align:left;
+  opacity:0;visibility:hidden;transition:opacity .15s;pointer-events:none;
+  box-shadow:0 6px 18px rgba(0,0,0,.65);
+}
+.i:hover::after,.i:focus::after{opacity:1;visibility:visible}
+.i:focus-visible{outline:2px solid var(--text);outline-offset:1px}
+
+/* ---- results ---- */
+.result{border:1px solid var(--green);border-radius:9px;padding:14px 13px;margin-top:14px;background:#0C1522}
+.rlab{
+  font-size:8.5px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;
+  display:flex;align-items:center;justify-content:center;gap:4px;margin-bottom:7px;
+}
+.rlab.g{color:var(--green)}
+.rlab.m{color:var(--label)}
+.big{
+  font-weight:700;line-height:1.05;text-align:center;letter-spacing:.01em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.sub{font-size:9.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;text-align:center;margin-top:6px;color:var(--text)}
+
+.split{display:flex;height:7px;border-radius:4px;overflow:hidden;background:var(--sunk);margin-top:11px}
+.split span{transition:width .4s cubic-bezier(.22,.61,.36,1)}
+.sH{background:var(--blue)} .sN{background:#38445C} .sA{background:var(--amber)}
+.key{display:flex;justify-content:space-between;gap:6px;margin-top:6px;font-family:var(--mono);font-size:9.5px;color:var(--faint)}
+.key b{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.div{height:1px;background:#243046;margin:14px 0}
+.dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:currentColor;margin-right:5px;vertical-align:middle}
+
+.stats{margin-top:14px;border-top:1px solid #243046;padding-top:11px}
+.srow{display:flex;justify-content:space-between;align-items:center;font-size:11px;margin-bottom:6px}
+.srow:last-child{margin-bottom:0}
+.srow span{color:var(--label)}
+.srow b{font-family:var(--mono);font-weight:500;font-variant-numeric:tabular-nums}
+.srow.tot{border-top:1px solid #243046;padding-top:9px;margin-top:9px}
+
+.foot{margin-top:22px;color:var(--faint);font-size:10.5px;line-height:1.6;max-width:80ch}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="top">
+    <h1>
+      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="1" y="8" width="3.4" height="7" rx=".7"/><rect x="6.3" y="4" width="3.4" height="11" rx=".7"/><rect x="11.6" y="1" width="3.4" height="14" rx=".7"/></svg>
+      Trading Dashboard
+    </h1>
+    <button class="add" id="add"><span>+</span> Add match</button>
+  </div>
+
+  <div class="board" id="board"></div>
+
+  <p class="foot">Rates are a Gamma posterior on open-play xG per effective minute, so remaining goals follow a negative binomial rather than a plain Poisson. Each board simulates independently from a seed derived from its own inputs, so identical inputs always return identical numbers. Outputs carry real uncertainty and are not predictions. If you bet, stake only what you can afford to lose.</p>
+</div>
+
+<script>
+"use strict";
+
+/* ---------------- model constants ---------------- */
+const SIMS=24000, TEMPO_SD=0.10, PEN_SHARE=0.08, RATE_CERTAINTY=8;
+const W=0.5, PENVAL=0.76, HSHARE=0.55, GSK=0.10, REDSELF=0.74;
+const MAX_BOARDS=6;
+
+/* goal hazard rises through the match: phi(0)=0.70, phi(90)=1.30, mean exactly 1.
+   Phi is its integral — effective minutes elapsed, with Phi(90)=90. */
+const A=0.70, B=1/150;
+const phi = m => A + B*Math.min(m,90);
+const Phi = m => m<=90 ? A*m + B*m*m/2 : 90 + 1.30*(m-90);
+
+/* seeded generator — identical inputs always produce identical output,
+   so numbers never drift while you sit on the same board. */
+function makeRng(seed){
+  let a=seed>>>0;
+  const next=()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};
+  let spare=null;
+  const normal=()=>{
+    if(spare!==null){const s=spare;spare=null;return s;}
+    let u,v,s2;
+    do{u=next()*2-1;v=next()*2-1;s2=u*u+v*v;}while(s2>=1||s2===0);
+    const m=Math.sqrt(-2*Math.log(s2)/s2);
+    spare=v*m;return u*m;
+  };
+  const gamma=shape=>{                          // Marsaglia–Tsang, rate 1
+    if(shape<1) return gamma(shape+1)*Math.pow(next(),1/shape);
+    const d=shape-1/3,c=1/Math.sqrt(9*d);
+    for(;;){
+      let x,v;
+      do{x=normal();v=1+c*x;}while(v<=0);
+      v=v*v*v;
+      const u=next();
+      if(u<1-0.0331*x*x*x*x) return d*v;
+      if(Math.log(u)<0.5*x*x+d*(1-v+Math.log(v))) return d*v;
+    }
+  };
+  return {next,normal,gamma};
+}
+function hash(str){
+  let h=2166136261;
+  for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619);}
+  return h>>>0;
+}
+
+const TIP_XG="Total expected goals from your feed. Enter any penalties below separately so they don't distort the tempo estimate.";
+const TIP_PEN="Penalties awarded so far. Each is stripped out at 0.76 xG before the scoring rate is estimated — a spot kick is a one-off event, not evidence of how open the game is.";
+const TIP_LG="League average goals per match, both teams combined. The baseline the model shrinks toward while live xG is still a small sample.";
+const TIP_INT="Your own read on current tempo, which accumulated xG can't see. 50% is normal. Scales both teams' forward scoring rate between ×0.63 and ×1.60.";
+const TIP_NG="Each side's share of the combined scoring rate across the minutes left, from 24,000 simulated match endings.";
+const TIP_OD="Total xG minus goals actually scored. It does NOT mean a goal is owed — chances already taken are spent. It flags that this match has been generating chances the scoreline doesn't reflect, which is why the forward rate is high.";
+
+let uid=0;
+const boards=[];
+
+function template(id){
+ return `
+  <div class="chead">
+    <div class="teams">
+      <input class="tname js-hname" value="Home" maxlength="16" aria-label="Home team name">
+      <i>vs</i>
+      <input class="tname js-aname" value="Away" maxlength="16" aria-label="Away team name">
+    </div>
+    <button class="rm js-rm" title="Remove this match" aria-label="Remove this match">&times;</button>
+  </div>
+  <div class="rule"></div>
+
+  <div class="solo">
+    <div class="lab">Match time (min)</div>
+    <input type="number" inputmode="decimal" class="js-minute" value="65" min="0" max="120" step="1">
+  </div>
+
+  <div class="pair">
+    <div><div class="lab">Live xG <i class="i" tabindex="0" data-tip="${TIP_XG}">i</i></div>
+      <input type="number" inputmode="decimal" class="js-hxg" value="1.30" min="0" max="12" step="0.01"></div>
+    <div><div class="lab">Live xG <i class="i" tabindex="0" data-tip="${TIP_XG}">i</i></div>
+      <input type="number" inputmode="decimal" class="js-axg" value="0.45" min="0" max="12" step="0.01"></div>
+  </div>
+
+  <div class="pair">
+    <div><div class="lab">Goals</div>
+      <input type="number" inputmode="decimal" class="js-hgoals" value="0" min="0" max="12" step="1">
+      <div class="redrow"><input type="checkbox" class="js-hred" id="rh${id}"><label for="rh${id}">Red</label></div></div>
+    <div><div class="lab">Goals</div>
+      <input type="number" inputmode="decimal" class="js-agoals" value="0" min="0" max="12" step="1">
+      <div class="redrow"><input type="checkbox" class="js-ared" id="ra${id}"><label for="ra${id}">Red</label></div></div>
+  </div>
+
+  <div class="pair">
+    <div><div class="lab">Pens <i class="i" tabindex="0" data-tip="${TIP_PEN}">i</i></div>
+      <input type="number" inputmode="decimal" class="js-hpen" value="0" min="0" max="5" step="1"></div>
+    <div><div class="lab">Pens <i class="i" tabindex="0" data-tip="${TIP_PEN}">i</i></div>
+      <input type="number" inputmode="decimal" class="js-apen" value="0" min="0" max="5" step="1"></div>
+  </div>
+
+  <div class="pair">
+    <div><div class="lab">League xG avg <i class="i" tabindex="0" data-tip="${TIP_LG}">i</i></div>
+      <input type="number" inputmode="decimal" class="js-lg" value="2.70" min="0.5" max="6" step="0.05"></div>
+    <div><div class="lab">Added time</div>
+      <input type="number" inputmode="decimal" class="js-injury" value="4" min="0" max="15" step="1"></div>
+  </div>
+
+  <div class="intense">
+    <div class="hd">
+      <div class="lab">Intensity <i class="i" tabindex="0" data-tip="${TIP_INT}">i</i></div>
+      <b class="js-intOut">50%</b>
+    </div>
+    <input type="range" class="js-intensity" min="0" max="100" step="1" value="50">
+  </div>
+
+  <div class="result">
+    <div class="rlab g">Next goal <i class="i" tabindex="0" data-tip="${TIP_NG}">i</i></div>
+    <div class="big js-ngBig">&mdash;</div>
+    <div class="sub js-ngSub">&mdash;</div>
+    <div class="split">
+      <span class="sH js-sH" style="width:40%"></span><span class="sN js-sN" style="width:25%"></span><span class="sA js-sA" style="width:35%"></span>
+    </div>
+    <div class="key">
+      <b style="color:var(--blue)" class="js-kH">&mdash;</b>
+      <b class="js-kN">&mdash;</b>
+      <b style="color:var(--amber)" class="js-kA">&mdash;</b>
+    </div>
+
+    <div class="div"></div>
+
+    <div class="rlab m">Overdue <i class="i" tabindex="0" data-tip="${TIP_OD}">i</i></div>
+    <div class="big js-odBig" style="font-size:31px">&mdash;</div>
+    <div class="sub js-odSub">&mdash;</div>
+
+    <div class="stats">
+      <div class="srow"><span>1+ Goal:</span><b class="js-g1">&mdash;</b></div>
+      <div class="srow"><span>2+ Goals:</span><b class="js-g2" style="color:var(--amber)">&mdash;</b></div>
+      <div class="srow"><span>3+ Goals:</span><b class="js-g3" style="color:var(--faint)">&mdash;</b></div>
+      <div class="srow tot"><span>Goals to come:</span><b class="js-gt" style="color:var(--green)">&mdash;</b></div>
+    </div>
+  </div>`;
+}
+
+function createBoard(){
+  if(boards.length>=MAX_BOARDS) return;
+  const id=++uid;
+  const el=document.createElement("div");
+  el.className="card";
+  el.innerHTML=template(id);
+  document.getElementById("board").appendChild(el);
+
+  const q=s=>el.querySelector("."+s);
+  const val=s=>{const v=parseFloat(q(s).value);return isFinite(v)?v:0;};
+  let timer=null;
+
+  function run(){
+    const minute=Math.max(0,Math.min(120,val("js-minute")));
+    const endM=Math.max(minute,90+Math.max(0,val("js-injury")));
+    const hg=Math.max(0,Math.round(val("js-hgoals"))), ag=Math.max(0,Math.round(val("js-agoals")));
+    const hr=q("js-hred").checked?1:0, ar=q("js-ared").checked?1:0;
+    const hxg=val("js-hxg"), axg=val("js-axg");
+    const hpen=Math.max(0,Math.round(val("js-hpen"))), apen=Math.max(0,Math.round(val("js-apen")));
+    const lg=val("js-lg"), iv=val("js-intensity");
+
+    q("js-intOut").textContent=Math.round(iv)+"%";
+    const INT=Math.pow(1.6,(iv-50)/50);          /* 0%→×0.63, 50%→×1.00, 100%→×1.60 */
+
+    /* posterior scoring rate per effective minute. Penalty xG is stripped (a
+       one-off shock, not evidence of tempo), then future penalties are added
+       back on. alpha and beta scale together by RATE_CERTAINTY: preserves the
+       mean, divides the variance, so dispersion stays independent of how fast
+       live xG overrides the league baseline.                                  */
+    const RE=1/(1-PEN_SHARE);
+    const post=(xg,pens,prior)=>({
+      alpha:(Math.max(0.05,prior*(1-PEN_SHARE))*W+Math.max(0,xg-PENVAL*pens))*RATE_CERTAINTY,
+      beta:((90*W+Phi(minute))/RE)*RATE_CERTAINTY
+    });
+    const H=post(hxg,hpen,lg*HSHARE), Aw=post(axg,apen,lg*(1-HSHARE));
+
+    const redOpp=1+(1-REDSELF)*0.85;
+    const hRed=Math.pow(REDSELF,hr)*Math.pow(redOpp,ar);
+    const aRed=Math.pow(REDSELF,ar)*Math.pow(redOpp,hr);
+    const gsMult=(d,m)=>{
+      const late=0.5+0.5*Math.min(m,90)/90;
+      const dev=d<0?GSK*Math.min(-d,2):d>0?-0.6*GSK*Math.min(d,2):0;
+      return 1+dev*late;
+    };
+
+    const rng=makeRng(hash([minute,endM,hg,ag,hr,ar,hxg,axg,hpen,apen,lg,Math.round(iv)].join(",")));
+    const k=1/(TEMPO_SD*TEMPO_SD);
+    let nH=0,nA=0,nN=0,sum=0;
+    const dist=[0,0,0,0];
+    for(let s=0;s<SIMS;s++){
+      const rH=rng.gamma(H.alpha)/H.beta, rA=rng.gamma(Aw.alpha)/Aw.beta, g=rng.gamma(k)/k;
+      let sh=hg,sa=ag,first=0;
+      for(let m=Math.floor(minute)+1;m<=endM;m++){
+        const f=phi(m)*g*INT, d=sh-sa;
+        if(rng.next()<1-Math.exp(-rH*f*hRed*gsMult(d,m))){sh++;if(!first)first=1;}
+        if(rng.next()<1-Math.exp(-rA*f*aRed*gsMult(-d,m))){sa++;if(!first)first=2;}
+      }
+      if(first===1)nH++;else if(first===2)nA++;else nN++;
+      const add=(sh-hg)+(sa-ag); sum+=add;
+      dist[Math.min(add,3)]++;
+    }
+
+    const pH=nH/SIMS,pA=nA/SIMS,pN=nN/SIMS;
+    const e=dist.map(d=>d/SIMS);
+    const p1=e[1]+e[2]+e[3], p2=e[2]+e[3], p3=e[3];
+    const pc=v=>(v*100).toFixed(1)+"%";
+
+    const hName=(q("js-hname").value||"Home").trim();
+    const aName=(q("js-aname").value||"Away").trim();
+
+    q("js-sH").style.width=(pH*100).toFixed(2)+"%";
+    q("js-sN").style.width=(pN*100).toFixed(2)+"%";
+    q("js-sA").style.width=(pA*100).toFixed(2)+"%";
+    q("js-kH").textContent=hName+" "+Math.round(pH*100)+"%";
+    q("js-kN").textContent="None "+Math.round(pN*100)+"%";
+    q("js-kA").textContent=aName+" "+Math.round(pA*100)+"%";
+
+    const big=q("js-ngBig"), top=Math.max(pH,pA,pN);
+    if(top===pN){
+      big.textContent="NO GOAL"; big.style.color="#8592A8"; big.style.fontSize="31px";
+      q("js-ngSub").textContent=Math.round(pN*100)+"% score stands";
+    }else{
+      const home=pH>pA, nm=(home?hName:aName).toUpperCase();
+      big.textContent=nm;
+      big.style.color=home?"var(--blue)":"var(--amber)";
+      big.style.fontSize=nm.length>11?"20px":nm.length>7?"25px":"31px";
+      const edge=Math.abs(pH-pA);
+      const qy=edge<0.04?"coin flip":edge<0.12?"slight edge":edge<0.25?"clear edge":"strong edge";
+      q("js-ngSub").textContent=Math.round(top*100)+"% next goal · "+qy;
+    }
+
+    /* overdue: xG minus goals. Flags a scoreline lagging the chances created —
+       it does not mean a goal is owed. */
+    const diff=(hxg+axg)-(hg+ag);
+    const od=q("js-odBig"), ods=q("js-odSub");
+    if(diff>=1){
+      const n=Math.floor(diff);
+      od.textContent="+"+n; od.style.color="var(--green)";
+      ods.innerHTML=`<span style="color:var(--green)"><span class="dot"></span>Value: ${n} overdue</span>`;
+    }else if(diff<=-1){
+      const n=Math.ceil(-diff);
+      od.textContent="\u2212"+n; od.style.color="var(--amber)";
+      ods.innerHTML=`<span style="color:var(--amber)"><span class="dot"></span>${n} above xG — running hot</span>`;
+    }else{
+      od.textContent="0"; od.style.color="#8592A8";
+      ods.innerHTML=`<span style="color:#8592A8"><span class="dot"></span>Score in line with xG</span>`;
+    }
+
+    q("js-g1").textContent=pc(p1);
+    q("js-g2").textContent=pc(p2);
+    q("js-g3").textContent=pc(p3);
+    q("js-gt").textContent=(sum/SIMS).toFixed(2);
+  }
+
+  el.querySelectorAll("input").forEach(inp=>inp.addEventListener("input",()=>{
+    if(inp.classList.contains("js-intensity")) q("js-intOut").textContent=Math.round(parseFloat(inp.value))+"%";
+    clearTimeout(timer); timer=setTimeout(run,110);
+  }));
+  q("js-rm").addEventListener("click",()=>{
+    el.remove();
+    boards.splice(boards.indexOf(el),1);
+    refresh();
+  });
+
+  boards.push(el);
+  run();
+  refresh();
+}
+
+function refresh(){
+  document.getElementById("add").disabled = boards.length>=MAX_BOARDS;
+  boards.forEach(b=>{ b.querySelector(".js-rm").style.visibility = boards.length>1?"visible":"hidden"; });
+}
+
+document.getElementById("add").addEventListener("click",createBoard);
+createBoard();
+</script>
+</body>
+</html>
