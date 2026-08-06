@@ -91,6 +91,8 @@ input[type=number]{
 input[type=number]::-webkit-outer-spin-button,
 input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 input[type=number]:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+::placeholder{color:#5A6479;opacity:1;font-weight:500}
+.tname::placeholder{color:#4E5871}
 
 /* iOS zooms the viewport when a focused input is under 16px — lift it on touch only */
 @media (pointer:coarse){
@@ -156,7 +158,7 @@ input[type=range]:focus-visible{outline:2px solid var(--blue);outline-offset:3px
 .stats{margin-top:14px;border-top:1px solid #243046;padding-top:11px}
 .srow{display:flex;justify-content:space-between;align-items:center;font-size:11px;margin-bottom:6px}
 .srow:last-child{margin-bottom:0}
-.srow span{color:var(--label)}
+.srow span{color:var(--label);display:inline-flex;align-items:center;gap:5px}
 .srow b{font-family:var(--mono);font-weight:500;font-variant-numeric:tabular-nums}
 .srow.tot{border-top:1px solid #243046;padding-top:9px;margin-top:9px}
 
@@ -184,8 +186,18 @@ input[type=range]:focus-visible{outline:2px solid var(--blue);outline-offset:3px
 "use strict";
 
 /* ---------------- model constants ---------------- */
-const SIMS=24000, TEMPO_SD=0.10, PEN_SHARE=0.08, RATE_CERTAINTY=8;
-const W=0.5, PENVAL=0.76, HSHARE=0.55, GSK=0.10, REDSELF=0.74;
+/* RATE_CERTAINTY scales alpha and beta together: the posterior mean is untouched
+   but its variance is divided, so how dispersed the scoring rate is stays
+   independent of how fast live xG overrides the baseline. Variance runs as
+   1/(W x RATE_CERTAINTY), so this must move inversely with W to hold the
+   full-match scoreline distribution on its real-world calibration. */
+const SIMS=24000, TEMPO_SD=0.10, PEN_SHARE=0.08, RATE_CERTAINTY=4;
+/* W is how many matches of information the league baseline is worth. It sets how
+   hard live xG has to work to move the projection: at W=1 the baseline counts as
+   a full match, so at 60' roughly 38% of the answer comes from live xG and 62%
+   from the baseline. Raising it damps the response to each new shot; too high
+   and the model stops telling a dull game apart from a wild one. */
+const W=1.0, PENVAL=0.76, HSHARE=0.55, GSK=0.10, REDSELF=0.74;
 const MAX_BOARDS=6;
 
 /* goal hazard rises through the match: phi(0)=0.70, phi(90)=1.30, mean exactly 1.
@@ -229,10 +241,11 @@ function hash(str){
 
 const TIP_XG="Total expected goals from your feed. Enter any penalties below separately so they don't distort the tempo estimate.";
 const TIP_PEN="Penalties awarded so far. Each is stripped out at 0.76 xG before the scoring rate is estimated — a spot kick is a one-off event, not evidence of how open the game is.";
-const TIP_LG="League average goals per match, both teams combined. The baseline the model shrinks toward while live xG is still a small sample.";
+const TIP_LG="League average goals per match, both teams combined. The baseline the model shrinks toward — it carries roughly 60% of the projection at the hour mark, so live xG moves the answer gradually rather than lurching on every shot.";
 const TIP_INT="Your own read on current tempo, which accumulated xG can't see. 50% is normal. Scales both teams' forward scoring rate between ×0.63 and ×1.60.";
-const TIP_NG="Each side's share of the combined scoring rate across the minutes left, from 24,000 simulated match endings.";
-const TIP_OD="Total xG minus goals actually scored. It does NOT mean a goal is owed — chances already taken are spent. It flags that this match has been generating chances the scoreline doesn't reflect, which is why the forward rate is high.";
+const TIP_NG="Each side's share of the combined scoring rate across the minutes left, from 24,000 simulated match endings. Reads 'Any team' when a goal is likely but the two sides sit within 5 points of each other.";
+const TIP_OD="How many more goals are coming, projected forward from the current scoring rate. The big number is the median — the most goals that are more likely than not. The decimal beside it is the average across all 24,000 simulations, so it moves with every xG change rather than jumping a whole goal at a time.";
+const TIP_GAP="Total xG minus goals actually scored, so far. Positive means chances have been wasted, negative means finishing has been clinical. It does NOT mean a goal is owed — chances already taken are spent. Use it to judge finishing, not to predict.";
 
 let uid=0;
 const boards=[];
@@ -241,9 +254,9 @@ function template(id){
  return `
   <div class="chead">
     <div class="teams">
-      <input class="tname js-hname" value="Home" maxlength="16" aria-label="Home team name">
+      <input class="tname js-hname" placeholder="Home" maxlength="16" aria-label="Home team name">
       <i>vs</i>
-      <input class="tname js-aname" value="Away" maxlength="16" aria-label="Away team name">
+      <input class="tname js-aname" placeholder="Away" maxlength="16" aria-label="Away team name">
     </div>
     <button class="rm js-rm" title="Remove this match" aria-label="Remove this match">&times;</button>
   </div>
@@ -251,37 +264,37 @@ function template(id){
 
   <div class="solo">
     <div class="lab">Match time (min)</div>
-    <input type="number" inputmode="decimal" class="js-minute" value="65" min="0" max="120" step="1">
+    <input type="number" inputmode="decimal" class="js-minute" min="0" max="120" step="1">
   </div>
 
   <div class="pair">
     <div><div class="lab">Live xG <i class="i" tabindex="0" data-tip="${TIP_XG}">i</i></div>
-      <input type="number" inputmode="decimal" class="js-hxg" value="1.30" min="0" max="12" step="0.01"></div>
+      <input type="number" inputmode="decimal" class="js-hxg" min="0" max="12" step="0.01"></div>
     <div><div class="lab">Live xG <i class="i" tabindex="0" data-tip="${TIP_XG}">i</i></div>
-      <input type="number" inputmode="decimal" class="js-axg" value="0.45" min="0" max="12" step="0.01"></div>
+      <input type="number" inputmode="decimal" class="js-axg" min="0" max="12" step="0.01"></div>
   </div>
 
   <div class="pair">
     <div><div class="lab">Goals</div>
-      <input type="number" inputmode="decimal" class="js-hgoals" value="0" min="0" max="12" step="1">
+      <input type="number" inputmode="decimal" class="js-hgoals" placeholder="0" min="0" max="12" step="1">
       <div class="redrow"><input type="checkbox" class="js-hred" id="rh${id}"><label for="rh${id}">Red</label></div></div>
     <div><div class="lab">Goals</div>
-      <input type="number" inputmode="decimal" class="js-agoals" value="0" min="0" max="12" step="1">
+      <input type="number" inputmode="decimal" class="js-agoals" placeholder="0" min="0" max="12" step="1">
       <div class="redrow"><input type="checkbox" class="js-ared" id="ra${id}"><label for="ra${id}">Red</label></div></div>
   </div>
 
   <div class="pair">
     <div><div class="lab">Pens <i class="i" tabindex="0" data-tip="${TIP_PEN}">i</i></div>
-      <input type="number" inputmode="decimal" class="js-hpen" value="0" min="0" max="5" step="1"></div>
+      <input type="number" inputmode="decimal" class="js-hpen" placeholder="0" min="0" max="5" step="1"></div>
     <div><div class="lab">Pens <i class="i" tabindex="0" data-tip="${TIP_PEN}">i</i></div>
-      <input type="number" inputmode="decimal" class="js-apen" value="0" min="0" max="5" step="1"></div>
+      <input type="number" inputmode="decimal" class="js-apen" placeholder="0" min="0" max="5" step="1"></div>
   </div>
 
   <div class="pair">
     <div><div class="lab">League xG avg <i class="i" tabindex="0" data-tip="${TIP_LG}">i</i></div>
-      <input type="number" inputmode="decimal" class="js-lg" value="2.70" min="0.5" max="6" step="0.05"></div>
+      <input type="number" inputmode="decimal" class="js-lg" placeholder="2.70" min="0.5" max="6" step="0.05"></div>
     <div><div class="lab">Added time</div>
-      <input type="number" inputmode="decimal" class="js-injury" value="4" min="0" max="15" step="1"></div>
+      <input type="number" inputmode="decimal" class="js-injury" placeholder="4" min="0" max="15" step="1"></div>
   </div>
 
   <div class="intense">
@@ -307,7 +320,7 @@ function template(id){
 
     <div class="div"></div>
 
-    <div class="rlab m">Overdue <i class="i" tabindex="0" data-tip="${TIP_OD}">i</i></div>
+    <div class="rlab m">Goals expected <i class="i" tabindex="0" data-tip="${TIP_OD}">i</i></div>
     <div class="big js-odBig" style="font-size:31px">&mdash;</div>
     <div class="sub js-odSub">&mdash;</div>
 
@@ -315,7 +328,7 @@ function template(id){
       <div class="srow"><span>1+ Goal:</span><b class="js-g1">&mdash;</b></div>
       <div class="srow"><span>2+ Goals:</span><b class="js-g2" style="color:var(--amber)">&mdash;</b></div>
       <div class="srow"><span>3+ Goals:</span><b class="js-g3" style="color:var(--faint)">&mdash;</b></div>
-      <div class="srow tot"><span>Goals to come:</span><b class="js-gt" style="color:var(--green)">&mdash;</b></div>
+      <div class="srow tot"><span>Finishing gap <i class="i" tabindex="0" data-tip="${TIP_GAP}">i</i></span><b class="js-gt" style="color:#8592A8">&mdash;</b></div>
     </div>
   </div>`;
 }
@@ -329,19 +342,39 @@ function createBoard(){
   document.getElementById("board").appendChild(el);
 
   const q=s=>el.querySelector("."+s);
-  const val=s=>{const v=parseFloat(q(s).value);return isFinite(v)?v:0;};
+  /* val() falls back when a field is left blank; has() distinguishes an empty
+     box from a legitimately entered 0, so 0 goals still counts as an answer. */
+  const val=(s,fb=0)=>{const t=q(s).value.trim();if(t==="")return fb;const v=parseFloat(t);return isFinite(v)?v:fb;};
+  const has=s=>{const t=q(s).value.trim();return t!==""&&isFinite(parseFloat(t));};
   let timer=null;
 
-  function run(){
-    const minute=Math.max(0,Math.min(120,val("js-minute")));
-    const endM=Math.max(minute,90+Math.max(0,val("js-injury")));
-    const hg=Math.max(0,Math.round(val("js-hgoals"))), ag=Math.max(0,Math.round(val("js-agoals")));
-    const hr=q("js-hred").checked?1:0, ar=q("js-ared").checked?1:0;
-    const hxg=val("js-hxg"), axg=val("js-axg");
-    const hpen=Math.max(0,Math.round(val("js-hpen"))), apen=Math.max(0,Math.round(val("js-apen")));
-    const lg=val("js-lg"), iv=val("js-intensity");
+  function setIdle(){
+    const big=q("js-ngBig");
+    big.textContent="\u2014"; big.style.color="#4B5568"; big.style.fontSize="31px";
+    q("js-ngSub").textContent="Enter match time and both xG values";
+    q("js-sH").style.width="0%"; q("js-sN").style.width="100%"; q("js-sA").style.width="0%";
+    q("js-kH").textContent="\u2014"; q("js-kN").textContent="\u2014"; q("js-kA").textContent="\u2014";
+    const od=q("js-odBig");
+    od.textContent="\u2014"; od.style.color="#4B5568";
+    q("js-odSub").innerHTML='<span style="color:#4B5568">Awaiting input</span>';
+    ["js-g1","js-g2","js-g3","js-gt"].forEach(c=>q(c).textContent="\u2014");
+  }
 
-    q("js-intOut").textContent=Math.round(iv)+"%";
+  function run(){
+    q("js-intOut").textContent=Math.round(val("js-intensity",50))+"%";
+
+    /* nothing is projected until the three fields the model genuinely needs are
+       present — a blank form would otherwise render a confident-looking kickoff */
+    if(!has("js-minute")||!has("js-hxg")||!has("js-axg")){ setIdle(); return; }
+
+    const minute=Math.max(0,Math.min(120,val("js-minute")));
+    const endM=Math.max(minute,90+Math.max(0,val("js-injury",4)));
+    const hg=Math.max(0,Math.round(val("js-hgoals",0))), ag=Math.max(0,Math.round(val("js-agoals",0)));
+    const hr=q("js-hred").checked?1:0, ar=q("js-ared").checked?1:0;
+    const hxg=Math.max(0,val("js-hxg")), axg=Math.max(0,val("js-axg"));
+    const hpen=Math.max(0,Math.round(val("js-hpen",0))), apen=Math.max(0,Math.round(val("js-apen",0)));
+    const lg=val("js-lg",2.70), iv=val("js-intensity",50);
+
     const INT=Math.pow(1.6,(iv-50)/50);          /* 0%→×0.63, 50%→×1.00, 100%→×1.60 */
 
     /* posterior scoring rate per effective minute. Penalty xG is stripped (a
@@ -385,10 +418,12 @@ function createBoard(){
     const pH=nH/SIMS,pA=nA/SIMS,pN=nN/SIMS;
     const e=dist.map(d=>d/SIMS);
     const p1=e[1]+e[2]+e[3], p2=e[2]+e[3], p3=e[3];
-    const pc=v=>(v*100).toFixed(1)+"%";
+    /* whole percentages: at one decimal a 0.05 xG nudge visibly twitches the
+       ladder, which reads as signal when it is really simulation resolution */
+    const pc=v=>Math.round(v*100)+"%";
 
-    const hName=(q("js-hname").value||"Home").trim();
-    const aName=(q("js-aname").value||"Away").trim();
+    const hName=q("js-hname").value.trim()||"Home";
+    const aName=q("js-aname").value.trim()||"Away";
 
     q("js-sH").style.width=(pH*100).toFixed(2)+"%";
     q("js-sN").style.width=(pN*100).toFixed(2)+"%";
@@ -397,41 +432,67 @@ function createBoard(){
     q("js-kN").textContent="None "+Math.round(pN*100)+"%";
     q("js-kA").textContent=aName+" "+Math.round(pA*100)+"%";
 
-    const big=q("js-ngBig"), top=Math.max(pH,pA,pN);
-    if(top===pN){
+    /* Headline asks two questions in order: is a goal coming at all, and if so
+       whose? Gating on pGoal rather than "is None the biggest of three" matters —
+       at 33/32/35 a goal is 65% likely, so NO GOAL would be the wrong headline.
+       The 8-point band is set by measurement, not taste: with identical live xG
+       for both sides the baseline's home share alone yields a 6-7 point lean
+       mid-match, so anything inside that is the venue talking, not the game.  */
+    const big=q("js-ngBig"), sub=q("js-ngSub");
+    const pGoal=pH+pA, edge=Math.abs(pH-pA);
+    if(pGoal<0.5){
       big.textContent="NO GOAL"; big.style.color="#8592A8"; big.style.fontSize="31px";
-      q("js-ngSub").textContent=Math.round(pN*100)+"% score stands";
+      sub.textContent=Math.round(pN*100)+"% score stands";
+    }else if(edge<0.08){
+      big.textContent="ANY TEAM"; big.style.color="var(--green)"; big.style.fontSize="29px";
+      sub.textContent=Math.round(pGoal*100)+"% a goal · too close to call";
     }else{
       const home=pH>pA, nm=(home?hName:aName).toUpperCase();
       big.textContent=nm;
       big.style.color=home?"var(--blue)":"var(--amber)";
       big.style.fontSize=nm.length>11?"20px":nm.length>7?"25px":"31px";
-      const edge=Math.abs(pH-pA);
-      const qy=edge<0.04?"coin flip":edge<0.12?"slight edge":edge<0.25?"clear edge":"strong edge";
-      q("js-ngSub").textContent=Math.round(top*100)+"% next goal · "+qy;
+      const qy=edge<0.14?"slight edge":edge<0.26?"clear edge":"strong edge";
+      sub.textContent=Math.round(Math.max(pH,pA)*100)+"% next goal · "+qy;
     }
 
-    /* overdue: xG minus goals. Flags a scoreline lagging the chances created —
-       it does not mean a goal is owed. */
-    const diff=(hxg+axg)-(hg+ag);
+    /* Expected goals to come. This asks a FORWARD question — how many more are
+       coming — rather than the backward "xG minus goals scored", which collapses
+       toward zero the moment both teams convert and so barely moves at 1-1.
+
+       Promotion needs a clear margin (60%), not a bare majority. At a 50% cut
+       the level flips the instant the cumulative edges past half, and the stated
+       confidence collapses with it — +1 at 80% becomes +2 at 50% on a 0.02-goal
+       move. Demanding 60% widens the plateau and keeps the quoted figure honest,
+       since it can never sit just barely over the line.                        */
+    const LEVEL_MIN=0.60;
+    const mean=sum/SIMS;
+    let level=0, lvlP=0;
+    if(p3>=LEVEL_MIN){level=3;lvlP=p3;}
+    else if(p2>=LEVEL_MIN){level=2;lvlP=p2;}
+    else if(p1>=LEVEL_MIN){level=1;lvlP=p1;}
     const od=q("js-odBig"), ods=q("js-odSub");
-    if(diff>=1){
-      const n=Math.floor(diff);
-      od.textContent="+"+n; od.style.color="var(--green)";
-      ods.innerHTML=`<span style="color:var(--green)"><span class="dot"></span>Value: ${n} overdue</span>`;
-    }else if(diff<=-1){
-      const n=Math.ceil(-diff);
-      od.textContent="\u2212"+n; od.style.color="var(--amber)";
-      ods.innerHTML=`<span style="color:var(--amber)"><span class="dot"></span>${n} above xG — running hot</span>`;
+    if(level>0){
+      od.textContent="+"+level; od.style.color="var(--green)";
+      ods.innerHTML=`<span style="color:var(--green)"><span class="dot"></span>${mean.toFixed(1)} expected · ${Math.round(lvlP*100)}% likely</span>`;
+    }else if(p1>=0.45){
+      /* a goal is close to even money — say so rather than rounding it away */
+      od.textContent="~1"; od.style.color="var(--amber)";
+      ods.innerHTML=`<span style="color:var(--amber)"><span class="dot"></span>${mean.toFixed(1)} expected · ${Math.round(p1*100)}% for one</span>`;
     }else{
-      od.textContent="0"; od.style.color="#8592A8";
-      ods.innerHTML=`<span style="color:#8592A8"><span class="dot"></span>Score in line with xG</span>`;
+      od.textContent=mean.toFixed(1); od.style.color="#8592A8";
+      ods.innerHTML=`<span style="color:#8592A8"><span class="dot"></span>Little left in the game</span>`;
     }
+
+    /* finishing gap: xG minus goals actually scored. Backward-looking — it says
+       who has been wasteful or clinical, NOT that a goal is owed. */
+    const gap=(hxg+axg)-(hg+ag);
+    const gapEl=q("js-gt");
+    gapEl.textContent=(gap>0?"+":"")+gap.toFixed(1);
+    gapEl.style.color=gap>=0.75?"var(--green)":gap<=-0.75?"var(--amber)":"#8592A8";
 
     q("js-g1").textContent=pc(p1);
     q("js-g2").textContent=pc(p2);
     q("js-g3").textContent=pc(p3);
-    q("js-gt").textContent=(sum/SIMS).toFixed(2);
   }
 
   el.querySelectorAll("input").forEach(inp=>inp.addEventListener("input",()=>{
